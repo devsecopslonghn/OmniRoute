@@ -1,4 +1,4 @@
-name: Publish to Docker Hub
+name: Publish OmniRoute container images
 
 on:
   push:
@@ -47,8 +47,11 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       promote_latest: ${{ steps.version.outputs.promote_latest }}
       skip: ${{ steps.version.outputs.skip }}
+    permissions:
+      contents: read
+      packages: read
     env:
-      IMAGE_NAME: diegosouzapw/omniroute
+      GHCR_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/omniroute
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -57,6 +60,13 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || '' }}
           # Need full tag history for semver comparison when deciding :latest.
           fetch-depth: 0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Resolve version, latest-promotion, and skip flag
         id: version
@@ -113,14 +123,14 @@ jobs:
           # and `next` channels are intentionally rebuilt on every matching push.
           SKIP="false"
           if [ "$VERSION" != "main" ] && [ "$VERSION" != "next" ]; then
-            if docker manifest inspect "diegosouzapw/omniroute:${VERSION}" >/dev/null 2>&1; then
-              echo "Image diegosouzapw/omniroute:${VERSION} already exists on Docker Hub — skipping rebuild."
+            if docker manifest inspect "${GHCR_IMAGE_NAME}:${VERSION}" >/dev/null 2>&1; then
+              echo "Image ${GHCR_IMAGE_NAME}:${VERSION} already exists on GHCR — skipping rebuild."
               SKIP="true"
             fi
           fi
           echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
 
-          echo "Publishing diegosouzapw/omniroute:$VERSION (promote_latest=$PROMOTE, skip=$SKIP)"
+          echo "Publishing ${GHCR_IMAGE_NAME}:$VERSION (promote_latest=$PROMOTE, skip=$SKIP)"
 
   build:
     name: Build Docker (${{ matrix.platform }})
@@ -155,8 +165,7 @@ jobs:
           - platform: linux/arm64
             arch: arm64
     env:
-      IMAGE_NAME: diegosouzapw/omniroute
-      GHCR_IMAGE_NAME: ghcr.io/diegosouzapw/omniroute
+      GHCR_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/omniroute
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -170,12 +179,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4.6.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4.6.0
@@ -196,7 +199,6 @@ jobs:
             OMNIROUTE_BUILD_MEMORY_MB=12288
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           tags: |
-            ${{ env.IMAGE_NAME }}
             ${{ env.GHCR_IMAGE_NAME }}
           cache-from: type=gha,scope=docker-${{ matrix.arch }}
           cache-to: type=gha,scope=docker-${{ matrix.arch }},mode=max,ignore-error=true
@@ -216,7 +218,6 @@ jobs:
             OMNIROUTE_BUILD_MEMORY_MB=12288
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           tags: |
-            ${{ env.IMAGE_NAME }}
             ${{ env.GHCR_IMAGE_NAME }}
           cache-from: type=gha,scope=docker-web-${{ matrix.arch }}
           cache-to: type=gha,scope=docker-web-${{ matrix.arch }},mode=max,ignore-error=true
@@ -244,7 +245,6 @@ jobs:
             OMNIROUTE_BUILD_MEMORY_MB=12288
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           tags: |
-            ${{ env.IMAGE_NAME }}
             ${{ env.GHCR_IMAGE_NAME }}
           cache-from: type=gha,scope=docker-bun-base-${{ matrix.arch }}
           cache-to: type=gha,scope=docker-bun-base-${{ matrix.arch }},mode=max,ignore-error=true
@@ -272,7 +272,6 @@ jobs:
             OMNIROUTE_BUILD_MEMORY_MB=12288
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           tags: |
-            ${{ env.IMAGE_NAME }}
             ${{ env.GHCR_IMAGE_NAME }}
           cache-from: type=gha,scope=docker-bun-web-${{ matrix.arch }}
           cache-to: type=gha,scope=docker-bun-web-${{ matrix.arch }},mode=max,ignore-error=true
@@ -353,8 +352,7 @@ jobs:
       packages: write
       security-events: write
     env:
-      IMAGE_NAME: diegosouzapw/omniroute
-      GHCR_IMAGE_NAME: ghcr.io/diegosouzapw/omniroute
+      GHCR_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/omniroute
       VERSION: ${{ needs.prepare.outputs.version }}
       PROMOTE_LATEST: ${{ needs.prepare.outputs.promote_latest }}
     steps:
@@ -367,12 +365,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4.6.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4.6.0
@@ -415,32 +407,6 @@ jobs:
           path: /tmp/digests/bun-web
           merge-multiple: true
 
-      - name: Create Docker Hub version manifests
-        run: |
-          set -euo pipefail
-
-          create_manifest() {
-            local image="$1" suffix="$2" dir="$3" optional="${4:-}"
-            local refs=()
-            while IFS= read -r digest_file; do
-              refs+=("${image}@sha256:$(basename "$digest_file")")
-            done < <(find "$dir" -type f | sort)
-            if [ "${#refs[@]}" -eq 0 ]; then
-              if [ -n "$optional" ]; then
-                echo "::warning::No image digests in $dir — skipping optional tag ${image}:${VERSION}${suffix}" >&2
-                return 0
-              fi
-              echo "No image digests in $dir" >&2
-              exit 1
-            fi
-            docker buildx imagetools create -t "${image}:${VERSION}${suffix}" "${refs[@]}"
-          }
-
-          create_manifest "${IMAGE_NAME}" "" /tmp/digests/base
-          create_manifest "${IMAGE_NAME}" "-web" /tmp/digests/web
-          create_manifest "${IMAGE_NAME}" "-bun" /tmp/digests/bun-base optional
-          create_manifest "${IMAGE_NAME}" "-web-bun" /tmp/digests/bun-web optional
-
       - name: Create GHCR version manifests
         run: |
           set -euo pipefail
@@ -473,7 +439,7 @@ jobs:
           set -euo pipefail
           container="omniroute-smoke-${VERSION//[^a-zA-Z0-9_.-]/-}"
           trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
-          docker run --detach --name "$container" "${IMAGE_NAME}:${VERSION}"
+          docker run --detach --name "$container" "${GHCR_IMAGE_NAME}:${VERSION}"
           for attempt in $(seq 1 30); do
             status="$(docker inspect --format '{{.State.Health.Status}}' "$container")"
             if [ "$status" = "healthy" ]; then
@@ -487,22 +453,6 @@ jobs:
           done
           docker logs "$container"
           exit 1
-
-      - name: Promote Docker Hub latest tags
-        if: needs.prepare.outputs.promote_latest == 'true'
-        run: |
-          set -euo pipefail
-          promote_tag() {
-            local suffix="$1"
-            docker buildx imagetools create -t "${IMAGE_NAME}:latest${suffix}" "${IMAGE_NAME}:${VERSION}${suffix}"
-          }
-          promote_tag ""
-          promote_tag "-web"
-          for suffix in -bun -web-bun; do
-            if docker buildx imagetools inspect "${IMAGE_NAME}:${VERSION}${suffix}" >/dev/null 2>&1; then
-              promote_tag "$suffix"
-            fi
-          done
 
       - name: Promote GHCR latest tags
         if: needs.prepare.outputs.promote_latest == 'true'
@@ -523,7 +473,7 @@ jobs:
       - name: Inspect image
         if: needs.prepare.outputs.version != 'main'
         run: |
-          docker buildx imagetools inspect "${IMAGE_NAME}:${VERSION}"
+          docker buildx imagetools inspect "${GHCR_IMAGE_NAME}:${VERSION}"
 
       - name: Generate CycloneDX SBOM (image, advisory)
         if: needs.prepare.outputs.version != 'main'
@@ -588,15 +538,3 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
           category: trivy-image
-
-      - name: Update Docker Hub description
-        # Only refresh README/description when we actually promote :latest
-        # (avoids overwriting from main, next, or back-fill builds).
-        if: needs.prepare.outputs.promote_latest == 'true'
-        uses: peter-evans/dockerhub-description@v5
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: diegosouzapw/omniroute
-          short-description: "OmniRoute — Unified AI proxy. Route any LLM through one endpoint."
-          readme-filepath: ./README.md
