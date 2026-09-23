@@ -345,16 +345,14 @@ RUN --mount=type=cache,id=s/92ca8a61-c1ba-421f-a389-d48ac7258c2d-apt-cache,targe
   && git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
 
 # Install CLI tools globally. Separate layer from apt for better cache reuse.
-# Pinned to exact versions per Diego's diagnosis in #12576 — floating
-# `@latest` causes two CI failures:
-#   1. `openclaw` ships a breaking major ~weekly; overnight builds silently
-#      advance to a version that no longer matches the tested combo stack.
-#   2. `codex` / `claude-code` dev pre-releases (`@next`, dist-tags) mutate
-#      API surface without notice; reproducible builds need a SHA-pinned dev
-#      build, not the floating `@latest`.
+# The publish workflow resolves Codex's stable npm `latest` dist-tag once and
+# passes that version as a build arg so amd64 and arm64 receive the same release.
+# Local builds default to the current stable release. Keep prerelease `@next`
+# channels out of production images.
+ARG CODEX_CLI_VERSION=latest
 RUN --mount=type=cache,id=s/92ca8a61-c1ba-421f-a389-d48ac7258c2d-npm-cache,target=/root/.npm \
   npm install -g --no-audit --no-fund \
-    @openai/codex@0.156.1 \
+    @openai/codex@${CODEX_CLI_VERSION} \
     @anthropic-ai/claude-code@2.1.260 \
     droid@0.212.0 \
     openclaw@2026.9.1
