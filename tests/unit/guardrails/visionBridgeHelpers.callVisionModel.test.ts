@@ -8,9 +8,16 @@ import dns from "node:dns";
 import { callVisionModel, type VisionModelConfig } from "@/lib/guardrails/visionBridgeHelpers";
 import { createProviderConnection } from "@/lib/db/providers";
 import { resetDbInstance } from "@/lib/db/core";
+import { validateApiKey } from "@/lib/db/apiKeys";
+import {
+  ADMISSION_BYPASS_SECRET_HEADER,
+  isInternalAdmissionBypass,
+  resolveSelfLoopBearer,
+} from "@/shared/middleware/chatAdmissionIdentity";
 
 // Store original fetch
 const originalFetch = globalThis.fetch;
+const originalApiKeySecret = process.env.API_KEY_SECRET;
 
 // Stub DNS for fetchRemoteImage's GHSA-cmhj-wh2f-9cgx DNS-rebinding guard
 // (assertHostnameResolvesPublic in src/shared/network/remoteImageFetch.ts).
@@ -45,6 +52,7 @@ process.on("exit", () => {
 // "anthropic/claude-3-haiku") so getBestVisionModel resolves the requested
 // fixedModel unchanged instead of null.
 test.before(async () => {
+  process.env.API_KEY_SECRET = "vision-bridge-unit-test-secret-2026";
   await createProviderConnection({
     provider: "openai",
     authType: "apikey",
@@ -61,6 +69,8 @@ test.before(async () => {
 
 test.after(() => {
   resetDbInstance();
+  if (originalApiKeySecret === undefined) delete process.env.API_KEY_SECRET;
+  else process.env.API_KEY_SECRET = originalApiKeySecret;
 });
 
 test("callVisionModel returns description on success", async () => {
@@ -118,6 +128,14 @@ test("callVisionModel can route a catalog model through the OmniRoute self-loop"
   assert.equal(url.pathname, "/v1/chat/completions");
   assert.equal(capturedBody.model, "openai/gpt-4o-mini");
   assert.equal(capturedHeaders["x-omniroute-admission-bypass"], "internal");
+  assert.equal(capturedHeaders[ADMISSION_BYPASS_SECRET_HEADER], resolveSelfLoopBearer());
+  const apiKey = capturedHeaders.Authorization.replace(/^Bearer /, "");
+  assert.notEqual(apiKey, resolveSelfLoopBearer());
+  assert.equal(await validateApiKey(apiKey), true);
+  const internalRequest = new Request(capturedUrl, { headers: capturedHeaders });
+  assert.equal(isInternalAdmissionBypass(internalRequest), true);
+  internalRequest.headers.set(ADMISSION_BYPASS_SECRET_HEADER, "invalid-secret");
+  assert.equal(isInternalAdmissionBypass(internalRequest), false);
   assert.match(capturedHeaders["x-omniroute-disabled-guardrails"], /video-bridge/);
   assert.equal(result, "GREEN_SCENE_2");
 });

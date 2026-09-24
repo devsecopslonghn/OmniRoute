@@ -5,7 +5,10 @@ import { detectMediaParts, type MediaPart } from "@omniroute/open-sse/utils/medi
 import { normalizeDataUri } from "@omniroute/open-sse/utils/imageNormalize";
 import { fetchRemoteImage } from "@/shared/network/remoteImageFetch";
 import { getRuntimePorts } from "@/lib/runtime/ports";
-import { resolveSelfLoopBearer } from "@/shared/middleware/chatBodyAdmission";
+import {
+  ADMISSION_BYPASS_SECRET_HEADER,
+  resolveSelfLoopBearer,
+} from "@/shared/middleware/chatAdmissionIdentity";
 import { getBestVisionModel, getFallbackModels, recordLatency } from "./visionBridgeRouter";
 import { REGISTRY } from "@omniroute/open-sse/config/providers";
 import { fetch as undiciFetch } from "undici";
@@ -799,22 +802,12 @@ async function callVisionModelSingle(
         headers["x-omniroute-disabled-guardrails"] = routeThroughOmniRoute
           ? "vision-bridge,video-bridge"
           : "vision-bridge";
-        // Internal self-loop sub-request: the parent request already holds the
-        // single heavyweight admission lease (`CHAT_MAX_HEAVY_IN_FLIGHT=1`), so a
-        // large base64-image describe body would be rejected with 503
-        // `chat_admission_busy` before it is described. The route only honors
-        // this header for trusted self-loop credentials (the local
-        // `sk_omniroute` sentinel OR the operator-configured env key), so
-        // external clients cannot use it to bypass admission.
         headers["x-omniroute-admission-bypass"] = "internal";
+        headers[ADMISSION_BYPASS_SECRET_HEADER] = resolveSelfLoopBearer();
         // The compression pipeline must not touch the image payload of the
         // self-loop describe call (stacked RTK/Caveman can mangle data URIs).
         headers["x-omniroute-compression"] = "off";
-        // The admission bypass honors the env key when set (REQUIRE_API_KEY=true
-        // deployments) and the `sk_omniroute` sentinel otherwise. Force the same
-        // resolved credential so the bypass holds even when a real vision key is
-        // configured for the vision model's provider.
-        headers["Authorization"] = `Bearer ${resolveSelfLoopBearer()}`;
+        headers["Authorization"] = `Bearer ${await resolveSelfLoopApiKey()}`;
       }
 
       response = await fetchImpl(`${baseUrl}/chat/completions`, {

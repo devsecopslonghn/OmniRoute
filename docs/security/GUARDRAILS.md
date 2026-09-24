@@ -221,12 +221,13 @@ Bridge tabs without removing the existing Speech-to-Text playground.
 
 **Self-loop admission bypass:** when the describe call routes through OmniRoute's
 own `/v1` self-loop (non-standard provider model), the sub-request sends
-`x-omniroute-admission-bypass: internal` and is authenticated with the resolved
-self-loop credential — the local `sk_omniroute` sentinel in local mode, or the
-operator-configured `OMNIROUTE_API_KEY` / `ROUTER_API_KEY` env key (#1350) so
-`REQUIRE_API_KEY=true` deployments can still run the describe call. The bypass
-is only honored for those exact credentials, so external clients cannot use the
-header to skip admission.
+`x-omniroute-admission-bypass: internal` and authenticates to the API with a
+DB-backed key created automatically when no `VISION_BRIDGE_API_KEY` is set.
+Admission bypass is authorized separately by a per-process secret in
+`x-omniroute-admission-secret`; callers cannot skip admission merely by supplying
+a valid API key. No extra environment variable is required by default, including
+when `REQUIRE_API_KEY=true`. An operator-provided `OMNIROUTE_API_KEY` /
+`ROUTER_API_KEY` remains supported for the legacy admission-bypass bearer.
 
 Legacy defaults live in `src/shared/constants/visionBridgeDefaults.ts`; the
 new mode/task-aware/cache defaults and the settings resolver live in
