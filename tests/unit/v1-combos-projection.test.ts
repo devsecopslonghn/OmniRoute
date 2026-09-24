@@ -90,6 +90,22 @@ test("#2300 projectCombo defaults strategy to 'priority' when missing", () => {
   assert.equal(out?.strategy, "priority");
 });
 
+test("coding combo advertises vision when every target supports image input", () => {
+  const out = projectCombo(
+    {
+      name: "coding",
+      strategy: "priority",
+      models: [
+        { kind: "model", model: "codex/gpt-6-sol", providerId: "codex" },
+        { kind: "model", model: "antigravity/claude-sonnet-4-6", providerId: "antigravity" },
+        { kind: "model", model: "kiro/claude-sonnet-4.5", providerId: "kiro" },
+      ],
+    },
+    { includeCapabilities: true }
+  );
+  assert.equal(out?.capabilities?.multimodal, true);
+});
+
 test("#2300 projectCombo returns null for empty name", () => {
   assert.equal(projectCombo({ name: "", models: [] }), null);
   assert.equal(projectCombo({ name: "   ", models: [] }), null);

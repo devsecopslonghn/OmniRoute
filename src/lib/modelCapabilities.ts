@@ -557,6 +557,8 @@ function resolveVisionCapability(
   if (typeof registryModel?.supportsVision === "boolean") return registryModel.supportsVision;
   if (typeof spec?.supportsVision === "boolean") return spec.supportsVision;
 
+  if (/^(?:codex|cx)\/gpt-[56](?:\.|-)/i.test(modelId ?? "")) return true;
+
   // Last resort: no capability data at all. Positively confirm known multimodal
   // families by model id so image requests can be routed to them; everything
   // else stays `null` (unknown).
