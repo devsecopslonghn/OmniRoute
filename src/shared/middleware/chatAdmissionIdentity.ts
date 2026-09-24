@@ -5,6 +5,7 @@ const ADMISSION_BYPASS_VALUE = "internal";
 const FINGERPRINT_KEY = "omniroute-admission-fingerprint-v1";
 
 export const ADMISSION_BYPASS_HEADER = "x-omniroute-admission-bypass";
+export const ADMISSION_BYPASS_SECRET_HEADER = "x-omniroute-admission-secret";
 
 export function resolveSessionId(request: Request): string {
   const authHeader = request.headers.get("authorization") || "";
@@ -49,10 +50,13 @@ export function isInternalAdmissionBypass(request: Request): boolean {
 
   const auth = request.headers.get("authorization") || "";
   const match = /^bearer\s+(\S+)$/i.exec(auth.trim());
-  if (!match) return false;
-  // This gates an admission-lane bypass on a shared secret, so the compare is
-  // constant-time — `===` leaks matching-prefix length (GHSA-7434 class).
-  return timingSafeCompare(match[1].trim().toLowerCase(), resolveSelfLoopBearer().toLowerCase());
+  const secret = request.headers.get(ADMISSION_BYPASS_SECRET_HEADER)?.trim();
+  if (!match && !secret) return false;
+  const expected = resolveSelfLoopBearer();
+  return (
+    (match !== null && timingSafeCompare(match[1].trim().toLowerCase(), expected.toLowerCase())) ||
+    (secret !== undefined && timingSafeCompare(secret, expected))
+  );
 }
 
 function fingerprint(value: string): string {

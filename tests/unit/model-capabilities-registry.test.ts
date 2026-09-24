@@ -109,6 +109,16 @@ test("canonical model capability resolver lets exact synced metadata override gl
   assert.equal(codexGpt55.supportsThinking, true);
   assert.equal(codexGpt55.supportsVision, true);
 
+  for (const model of ["gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol"]) {
+    assert.equal(modelCapabilities.getResolvedModelCapabilities(`codex/${model}`).supportsVision, true);
+    assert.equal(
+      modelCapabilities.getResolvedModelCapabilities({ provider: "codex", model }).supportsVision,
+      true
+    );
+  }
+  assert.notEqual(modelCapabilities.getResolvedModelCapabilities("codex/codex-auto-review").supportsVision, true);
+  assert.notEqual(modelCapabilities.getResolvedModelCapabilities("cmd/gpt-5.3-codex").supportsVision, true);
+
   const bedrockSonnet46 = modelCapabilities.getResolvedModelCapabilities(
     "bedrock/eu.anthropic.claude-sonnet-4-6"
   );
