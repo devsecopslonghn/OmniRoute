@@ -298,3 +298,4 @@ docker-compose.yml.bak
 
 # check:install-upgrade work trees (~12 GB, disposable)
 /.install-upgrade/
+__pycache__/
